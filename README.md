@@ -15,5 +15,11 @@ python ./setup.py build_ext --inplace
 
 Trace the plot of the likelihood
 --------------------------------
-For set the parameters, open the file *trace_likelihood_3d.py* and set the corresponding parameters. Then do:
+It is possible to do a 3d-plot of the likelihood function for differences values of *(n, M)* and a fixed value of *theta*. First open the file *trace_likelihood_3d.py* and set the corresponding parameters:
+- the input file
+- range of values for *n*
+- range of values for *M*
+- the value of *theta*
+
+Then do:
 python ./trace_likelihood_3d.py
