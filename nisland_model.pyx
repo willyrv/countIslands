@@ -5,6 +5,7 @@ import numpy as np
 import decimal
 from decimal import Decimal
 from scipy.optimize import fmin
+from scipy.optimize import minimize
 from scipy.optimize import fminbound
 
 def compute_constants(n, M):
@@ -13,9 +14,6 @@ def compute_constants(n, M):
     a = 0.5 + (1.0 + (float(n-2)*M)/(n-1))/(2*B)
     alpha = 0.5*(A+B)
     beta = 0.5*(A-B)
-    E = (1 + (float(n-2)*M)/(n-1)) / (2*B)
-    AplusB = A+B
-    AminusB = A-B
     return [a, alpha, beta]
     
 def prob_distrib(k, theta, a, alpha, beta):
@@ -64,7 +62,7 @@ def log_likelihood_hist(obs, n, M, theta):
     with respect to the observations. Assumes the observations are sorted
     from 0 to max_ndiff in a histogram
     """
-    if (n<2) or (M<0):
+    if (n<2) or (M<0) or (theta<=0):
         return -sys.maxint
     else:
         [a, alpha, beta] = compute_constants(n, M)
@@ -144,37 +142,96 @@ def max_llk_est(obs, theta):
             temp_n = n
     return [temp_n, temp_result[0], -temp_result[1]]
     
-def max_llk_estim_hist(obs, theta):
+def max_llk_estim_hist(obs, theta=''):
     """
     Estimates the parameters n and M that maximize the log-likelihood of 
     the observations.
+    If theta (the mutation rate) is not given, it estimates also the 
+    mutation rate from the input data.
     The maximum likelihood is approximated by doing a maximization on 
-    RxR. Then the we do a maximization on R for each n in the intervall
+    R^2 or R^3, depending if theta is given or not.
+    Then the we do a maximization for each n in the intervall
     [estim_n-5, estim_n+5]. Returns the best of the estimated values.
     The input is assumed to be a histogram.
     """
-    # Find an approximation for n real
+    # Find an approximation assumin n real
+    if theta == '':
+        return max_llk_estim_hist_theta_variable(obs)
+    else:
+        return max_llk_estim_hist_theta_fixed(obs, theta)
+
+def max_llk_estim_hist_theta_fixed(obs, theta):
+    # Find an approximation assuming n real
     llk = lambda x: -log_likelihood_hist(obs, x[0], x[1], theta)
-    (n_real, M_real) = fmin(llk, [10, 1], disp=False)
-    
-    # Take an intervall arround n_real   
+    (n_real, M_real) = fmin(llk, [10, 1], disp=False)    
+    # Take an intervall arround n_real
     n_integer = int(n_real)
     min_M = 0
     max_M = 1000
     n_list = np.arange(max(2, n_integer-5), n_integer+5, 1)
     min_n = n_list[0]
-    llM = lambda x: -log_likelihood_hist(obs, min_n, x, theta)
+    llk = lambda x: -log_likelihood_hist(obs, min_n, x, theta)
+    temp_result = fminbound(llk, min_M, max_M, full_output=True, disp=False)
     temp_n = min_n
     # the method minimize_scalar only works from version 0.11.0
     #temp_result = minimize_scalar(llM, bounds=(min_M, max_M), method='bounded')
 
     #here we use version 0.9
-    temp_result = fminbound(llM, min_M, max_M, full_output=True, disp=False)
+    #temp_result = fminbound(llM, min_M, max_M, full_output=True, disp=False)
     for n in n_list[1:]:
-        llM = lambda x: -log_likelihood_hist(obs, n, x, theta)
+        llk = lambda x: -log_likelihood_hist(obs, n, x, theta)
         #res = minimize_scalar(llM, bounds=(min_M, max_M), method='bounded')
-        res = fminbound(llM, min_M, max_M, full_output=True, disp=False)
+        res = fminbound(llk, min_M, max_M, full_output=True, disp=False)
         if res[1] < temp_result[1]:
             temp_result = res
             temp_n = n
-    return [temp_n, temp_result[0], -temp_result[1]]    
+    return [temp_n, temp_result[0], -temp_result[1]]
+
+def max_llk_estim_hist_theta_variable(obs):
+    # Estimating mutation rate from number of mutations
+    temp = 0
+    for i in range(1, len(obs)):
+        temp += i*obs[i]
+    initial_theta = float(temp)/sum(obs)
+    # Find an approximation assuming n real
+    llk = lambda x: -log_likelihood_hist(obs, x[0], x[1], x[2])
+    (n_real, M_real, estim_theta) = fmin(llk, [10, 1, initial_theta], disp=False)
+    #print("First values: n={}, M={}, theta={}".format(n_real, M_real, estim_theta))
+
+    # Take an intervall arround n_real
+    n_integer = int(n_real)
+    n_list = np.arange(max(2, n_integer-5), n_integer+5, 1)
+    min_n = n_list[0]
+    # Doing the first optimization (for the first value of n)
+    llk = lambda x: -log_likelihood_hist(obs, min_n, x[0], x[1])
+    result = fmin(llk, [M_real, estim_theta],
+                                        full_output=True, disp=False)
+    [(new_estim_M, new_estim_theta), f_value]= [result[0], result[1]]
+    current_n = min_n
+    current_estim_M = new_estim_M
+    current_estim_theta = new_estim_theta
+    current_f_value = f_value
+    #print("values for n_integer: n={}, M={}, theta={}, llk={}".format(current_n,
+    #      current_estim_M, current_estim_theta, current_f_value))
+          
+          
+    # the method minimize_scalar only works from version 0.11.0
+    #temp_result = minimize_scalar(llM, bounds=(min_M, max_M), method='bounded')
+
+    #here we use version 0.9
+    #temp_result = fminbound(llM, min_M, max_M, full_output=True, disp=False)
+    for n in n_list[1:]:
+        llk = lambda x: -log_likelihood_hist(obs, n, x[0], x[1])
+        result =  fmin(llk, [M_real, estim_theta],
+                                            full_output=True, disp=False)
+        [(new_estim_M, new_estim_theta), new_f_value]= [result[0], result[1]]
+        #print(result)
+        #print(n, new_estim_M, new_estim_theta, new_f_value)
+        #res = minimize_scalar(llM, bounds=(min_M, max_M), method='bounded')
+        if new_f_value < current_f_value:
+            # A better value was found
+            current_n = n
+            current_estim_M = new_estim_M
+            current_estim_theta = new_estim_theta
+            current_f_value = new_f_value
+    return [current_n, current_estim_M, current_estim_theta, -current_f_value]
